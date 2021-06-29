@@ -35,7 +35,7 @@ class SeqEncoderLSTM(nn.Module):
         return (torch.rand(self.num_layers*self.direct, self.batch_size, self.hidden_size // self.direct, device=device),
                 torch.rand(self.num_layers*self.direct, self.batch_size, self.hidden_size // self.direct, device=device))
 
-# Child-sum treelstm from
+# Child-sum treelstm from unbounce/
 class ChildSumTreeLSTM(torch.nn.Module):
     '''PyTorch TreeLSTM model that implements efficient batching.
     '''
@@ -225,3 +225,16 @@ class SeqDecoderAttentionLSTM(nn.Module):
     def initHidden(self):
         return (torch.rand(self.num_layers, self.batch_size, self.hidden_size, device=device),
                 torch.rand(self.num_layers, self.batch_size, self.hidden_size, device=device))
+
+class binaryClassifierNet(nn.Module):
+    def __init__(self, hidden_size):
+        super(binaryClassifierNet,self).__init__()
+        self.fc1 = nn.Linear(hidden_size,hidden_size)
+        self.fc2 = nn.Linear(hidden_size,hidden_size)
+        self.fc3 = nn.Linear(hidden_size,1)
+
+    def forward(self,x):
+        x = torch.relu(self.fc1(x))
+        x = torch.relu(self.fc2(x))
+        out = torch.sigmoid(self.fc3(x))
+        return out

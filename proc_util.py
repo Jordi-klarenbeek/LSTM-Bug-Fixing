@@ -88,7 +88,7 @@ class sequentializer:
         depths = list()
 
         for i, row in ast_df.iterrows():
-            self.depth(row['before'], 0)
+            self.depth(row['tree'], 0)
             depths.append(max(self.depth_list))
             self.depth_list = []
 

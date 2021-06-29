@@ -41,19 +41,21 @@ class Trainer(object):
         # returns tuple with hidden state and cell state
         encoder_state = self.encoder(input_tree['features'], input_tree['node_order'], input_tree['adjacency_list'], input_tree['edge_order'])
 
-        hidden = torch.zeros(1, self.batch_size, self.encoder.hidden_size, device=self.device)
-        cell = torch.zeros(1, self.batch_size, self.encoder.hidden_size, device=self.device)
+        hidden = torch.zeros(self.decoder.num_layers, self.batch_size, self.encoder.hidden_size, device=self.device)
+        cell = torch.zeros(self.decoder.num_layers, self.batch_size, self.encoder.hidden_size, device=self.device)
 
         # Create index list for accessing all root node hidden and cell states
         tree_indices = input_tree['tree_sizes']
         tree_indices.insert(0,0)
+        # Pop the last indice as it does not reference the position of a tree roots hidden state
         tree_indices.pop()
 
-        j = 0
-        for index in tree_indices:
-            hidden[0][j] = encoder_state[0][index]
-            cell[0][j] = encoder_state[1][index]
-            j+=1
+        for layer in range(self.decoder.num_layers):
+            j = 0
+            for index in tree_indices:
+                hidden[layer][j] = encoder_state[0][index]
+                cell[layer][j] = encoder_state[1][index]
+                j+=1
 
         decoder_hidden_cell = (hidden, cell)
 
@@ -149,27 +151,80 @@ class Trainer(object):
 
         return loss.item() / (target_length)
 
+    def trainClassifier(self, input_tensor, labels):
+        self.encoder_optimizer.zero_grad()
+        self.decoder_optimizer.zero_grad()
+
+        if isinstance(self.encoder, model.SeqEncoderLSTM):
+            encoder_hidden_cell = self.encoder.initHidden()
+
+            for ei in range(self.max_length):
+                encoder_output, encoder_hidden_cell = self.encoder(
+                    input_tensor[:, ei].view(self.batch_size, 1), encoder_hidden_cell)
+
+            # Reshape hidden cell tuple to concat bidirectional values
+            hidden = encoder_hidden_cell[0].view(1, self.batch_size, self.encoder.hidden_size)
+        else:
+            # returns tuple with hidden state and cell state
+            encoder_state = self.encoder(input_tensor['features'], input_tensor['node_order'], input_tensor['adjacency_list'],
+                                         input_tensor['edge_order'])
+
+            hidden = torch.zeros(1, self.batch_size, self.encoder.hidden_size, device=self.device)
+
+            # Create index list for accessing all root node hidden and cell states
+            tree_indices = input_tensor['tree_sizes']
+            tree_indices.insert(0, 0)
+            # Pop the last indice as it does not reference the position of a tree roots hidden state
+            tree_indices.pop()
+
+            j = 0
+            for index in tree_indices:
+                hidden[0][j] = encoder_state[0][index]
+                j += 1
+
+        prediction = self.decoder(hidden)
+
+        loss = self.criterion(prediction, labels.view(1, self.batch_size, 1))
+
+        loss.backward()
+
+        self.encoder_optimizer.step()
+        self.decoder_optimizer.step()
+
+        return loss.item()
+
     def trainIters(self, X_list, Y_list, n_iters, print_every=100):
         start = time.time()
         print_loss_total = 0  # Reset every print_every
         epoch_loss_total = 0
 
         for iter in range(n_iters):
+
             if isinstance(self.encoder, model.ChildSumTreeLSTM):
                 input_tree = X_list[iter * self.batch_size:(iter + 1) * self.batch_size]
                 batched_trees = batch_tree_input(input_tree)
-                #target_tensor = torch.tensor(Y_list[iter], dtype=torch.long, device=self.device)
-                target_tensor = torch.tensor(Y_list[iter * self.batch_size:(iter + 1) * self.batch_size],
-                                             dtype=torch.long, device=self.device)
 
-                loss = self.trainTree(batched_trees, target_tensor)
-            else:
+                if isinstance(self.decoder, model.binaryClassifierNet):
+                    target_tensor = torch.tensor(Y_list[iter * self.batch_size:(iter + 1) * self.batch_size],
+                                                 dtype=torch.float, device=self.device)
+                    loss = self.trainClassifier(batched_trees, target_tensor)
+                else:
+                    target_tensor = torch.tensor(Y_list[iter * self.batch_size:(iter + 1) * self.batch_size],
+                                                 dtype=torch.long, device=self.device)
+                    loss = self.trainTree(batched_trees, target_tensor)
+
+            elif isinstance(self.encoder, model.SeqEncoderLSTM):
                 input_tensor = torch.tensor(X_list[iter * self.batch_size:(iter + 1) * self.batch_size],
                                             dtype=torch.long, device=self.device)
-                target_tensor = torch.tensor(Y_list[iter * self.batch_size:(iter + 1) * self.batch_size],
-                                             dtype=torch.long, device=self.device)
 
-                loss = self.trainSeq(input_tensor, target_tensor)
+                if isinstance(self.decoder, model.binaryClassifierNet):
+                    target_tensor = torch.tensor(Y_list[iter * self.batch_size:(iter + 1) * self.batch_size],
+                                                 dtype=torch.float, device=self.device)
+                    loss = self.trainClassifier(input_tensor, target_tensor)
+                else:
+                    target_tensor = torch.tensor(Y_list[iter * self.batch_size:(iter + 1) * self.batch_size],
+                                                 dtype=torch.long, device=self.device)
+                    loss = self.trainSeq(input_tensor, target_tensor)
 
             print_loss_total += loss
             epoch_loss_total += loss
@@ -180,9 +235,8 @@ class Trainer(object):
                 print('%s (%d %d%%) %.4f' % (util.timeSince(start, iter / n_iters),
                                              iter * self.batch_size, iter / n_iters * 100, print_loss_avg))
 
-        epoch_loss_avg = print_loss_total / n_iters
+        epoch_loss_avg = print_loss_total
         print('Average loss for epoch is %.4f (%s)' % (epoch_loss_avg, util.timeSince(start, n_iters)))
-
 
     # helper function for testing
     def testtree(self, X_list, Y_list):
@@ -205,19 +259,20 @@ class Trainer(object):
                 encoder_state = self.encoder(batched_tree['features'], batched_tree['node_order'],
                                              batched_tree['adjacency_list'], batched_tree['edge_order'])
 
-                hidden = torch.zeros(1, self.batch_size, self.encoder.hidden_size, device=self.device)
-                cell = torch.zeros(1, self.batch_size, self.encoder.hidden_size, device=self.device)
+                hidden = torch.zeros(self.decoder.num_layers, self.batch_size, self.encoder.hidden_size, device=self.device)
+                cell = torch.zeros(self.decoder.num_layers, self.batch_size, self.encoder.hidden_size, device=self.device)
 
                 # Create index list for accessing all root node hidden and cell states
                 tree_indices = batched_tree['tree_sizes']
                 tree_indices.insert(0, 0)
                 tree_indices.pop()
 
-                j = 0
-                for index in tree_indices:
-                    hidden[0][j] = encoder_state[0][index]
-                    cell[0][j] = encoder_state[1][index]
-                    j += 1
+                for layer in range(self.decoder.num_layers):
+                    j = 0
+                    for index in tree_indices:
+                        hidden[layer][j] = encoder_state[0][index]
+                        cell[layer][j] = encoder_state[1][index]
+                        j += 1
 
                 decoder_hidden_cell = (hidden, cell)
 
@@ -241,7 +296,7 @@ class Trainer(object):
 
     def testseq(self, X_test, Y_test):
         with torch.no_grad():
-            input_amount = len(X_test)
+            input_amount = len(X_test) - (len(X_test) % self.batch_size)
             input_length = 1000
 
             bleuScores = []
@@ -298,3 +353,57 @@ class Trainer(object):
 
         print(f'The average bleu score is : {meanScores}')
         print(f'The std of the bleu score is : {stdScores}')
+
+    def testClas(self, X_test, Y_test):
+        with torch.no_grad():
+            input_amount = len(X_test) - (len(X_test) % self.batch_size)
+
+            match = 0
+            total = 0
+
+            for i in tqdm(range(math.floor(input_amount / self.batch_size)), desc="Evaluation : "):
+                labels = torch.tensor(Y_test[i * self.batch_size:(i + 1) * self.batch_size], dtype=torch.long,
+                                             device=self.device)
+
+                if isinstance(self.encoder, model.SeqEncoderLSTM):
+                    input_tensor = torch.tensor(X_test[i * self.batch_size:(i + 1) * self.batch_size], dtype=torch.long,
+                                                device=self.device)
+
+                    encoder_hidden_cell = self.encoder.initHidden()
+
+                    for ei in range(self.max_length):
+                        encoder_output, encoder_hidden_cell = self.encoder(
+                            input_tensor[:, ei].view(self.batch_size, 1), encoder_hidden_cell)
+
+                    # Reshape hidden cell tuple to concat bidirectional values
+                    hidden = encoder_hidden_cell[0].view(1, self.batch_size, self.encoder.hidden_size)
+                else:
+                    input_tree = X_test[i * self.batch_size:(i + 1) * self.batch_size]
+                    tree_batch = batch_tree_input(input_tree)
+
+                    # returns tuple with hidden state and cell state
+                    encoder_state = self.encoder(tree_batch['features'], tree_batch['node_order'],
+                                                 tree_batch['adjacency_list'],
+                                                 tree_batch['edge_order'])
+
+                    hidden = torch.zeros(1, self.batch_size, self.encoder.hidden_size, device=self.device)
+
+                    # Create index list for accessing all root node hidden and cell states
+                    tree_indices = tree_batch['tree_sizes']
+                    tree_indices.insert(0, 0)
+                    # Pop the last indice as it does not reference the position of a tree roots hidden state
+                    tree_indices.pop()
+
+                    j = 0
+                    for index in tree_indices:
+                        hidden[0][j] = encoder_state[0][index]
+                        j += 1
+
+                prediction = self.decoder(hidden)
+
+                for label in labels:
+                    total += 1
+                    if round(prediction) == label:
+                        match += 1
+
+            print(f"Accuracy of model is {match/total} of {total} datapoints")

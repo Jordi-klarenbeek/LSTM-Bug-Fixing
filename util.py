@@ -27,35 +27,58 @@ def convert_tree_to_tensors(tree_dict):
     }
 
 # Import csv with before and after sequences.
-def import_data(split, dataset_path, encoder):
+def import_data(split, dataset_path, encoder, decoder):
     df_bugfixpairs = pd.read_csv(dataset_path, encoding="utf-8")
     split_index = math.floor(df_bugfixpairs.shape[0] * split)
     print(f"Dataset is split on index : {split_index}")
 
     df_shuffled = df_bugfixpairs.sample(frac=1).reset_index(drop=True)
 
-    # Fill list with before values
-    X_total = []
-    for index, row in df_shuffled.iterrows():
-        # Prepare the before data different based on the encoder
-        if encoder == "tree":
-            tree_dict = json.loads(row['before'])
-            X = convert_tree_to_tensors(tree_dict)
-        else:
-            X = np.array(string2list(row['before']))
+    if decoder == "clas":
+        # Fill list with before values
+        X_total = []
+        for index, row in df_shuffled.iterrows():
+            # Prepare the before data different based on the encoder
+            if encoder == "tree":
+                tree_dict = json.loads(row['tree'])
+                X = convert_tree_to_tensors(tree_dict)
+            else:
+                X = np.array(string2list(row['tree']))
 
-        X_total.append(X)
+            X_total.append(X)
 
-    X_train = X_total[:split_index]
-    X_test = X_total[split_index:]
+        X_train = X_total[:split_index]
+        X_test = X_total[split_index:]
 
-    Y_total = []
-    for index, row in df_shuffled.iterrows():
-        arrayList = np.array(string2list(row['after']))
-        Y_total.append(arrayList)
+        Y_total = []
+        for index, row in df_shuffled.iterrows():
+            Y_total.append(row['label'])
 
-    Y_train = Y_total[:split_index]
-    Y_test = Y_total[split_index:]
+        Y_train = Y_total[:split_index]
+        Y_test = Y_total[split_index:]
+    else:
+        # Fill list with before values
+        X_total = []
+        for index, row in df_shuffled.iterrows():
+            # Prepare the before data different based on the encoder
+            if encoder == "tree":
+                tree_dict = json.loads(row['before'])
+                X = convert_tree_to_tensors(tree_dict)
+            else:
+                X = np.array(string2list(row['before']))
+
+            X_total.append(X)
+
+        X_train = X_total[:split_index]
+        X_test = X_total[split_index:]
+
+        Y_total = []
+        for index, row in df_shuffled.iterrows():
+            arrayList = np.array(string2list(row['after']))
+            Y_total.append(arrayList)
+
+        Y_train = Y_total[:split_index]
+        Y_test = Y_total[split_index:]
 
     return X_train, Y_train, X_test, Y_test
 

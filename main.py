@@ -77,7 +77,7 @@ def main():
     training_split = 0.9
 
     print(f"Path to input data : {args.csv_file_path}")
-    X_train, Y_train, X_test, Y_test = util.import_data(training_split, args.csv_file_path, encoder_arch)
+    X_train, Y_train, X_test, Y_test = util.import_data(training_split, args.csv_file_path, encoder_arch, decoder_arch)
 
     # Fill in hyperparameters
     teacher_forcing_ratio = 0.9
@@ -87,11 +87,13 @@ def main():
     batch_size = int(args.batch_size)
     n_iter = math.floor(len(X_train) / batch_size)
     max_length = 1001
-    num_layers = 1
-    bidirectional = False
+    num_layers = 2
+    bidirectional = True
     epochs = int(args.epochs)
     end_token = int(args.end_token)
     begin_token = int(args.begin_token)
+
+    print(f"Hidden size : {hidden_size}")
 
     if encoder_arch == "seq":
         encoder = model.SeqEncoderLSTM(vocab_size, hidden_size, batch_size, num_layers, bidirectional).to(device)
@@ -108,12 +110,18 @@ def main():
         else:
             decoder = model.SeqDecoderAttentionLSTM(hidden_size, vocab_size, batch_size, max_length, num_layers,
                                                     dropout_p=0.1).to(device)
+    elif decoder_arch == "clas":
+        decoder = model.binaryClassifierNet(hidden_size)
     else:
         raise Exception("Select valid encoder architecture")
 
     encoder_optimizer = optim.Adam(encoder.parameters(), lr=learning_rate)
     decoder_optimizer = optim.Adam(decoder.parameters(), lr=learning_rate)
-    criterion = nn.NLLLoss()
+
+    if decoder_arch == "clas":
+        criterion = nn.BCELoss()
+    else:
+        criterion = nn.NLLLoss()
 
     """ Code to print baseline blue score between before and after data
     # Test the baseline BLEU score before transformation
@@ -134,9 +142,11 @@ def main():
 
     for i in range(epochs):
         print(f'+++ Epoch number : {i} +++')
-        modelTrainer.trainIters(X_train, Y_train, n_iter, print_every=50)
-#(n_iter/11)
-    if encoder_arch == "tree":
+        modelTrainer.trainIters(X_train, Y_train, n_iter, print_every=25)
+
+    if decoder_arch == "clas":
+        modelTrainer.testClas(X_test, Y_test)
+    elif encoder_arch == "tree":
         modelTrainer.testtree(X_test, Y_test)
     else:
         modelTrainer.testseq(X_test, Y_test)
