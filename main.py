@@ -58,6 +58,12 @@ def main():
                              help='the learning rate of the model',
                              required=True)
 
+    args_parser.add_argument('-len', '--sequence_length',
+                             metavar='sequence_length',
+                             type=str,
+                             help='the length of the sequences',
+                             required=True)
+
     args_parser.add_argument('-end', '--end_token',
                              metavar='end_token',
                              type=str,
@@ -86,7 +92,7 @@ def main():
     vocab_size = 179
     batch_size = int(args.batch_size)
     n_iter = math.floor(len(X_train) / batch_size)
-    max_length = 1001
+    max_length = int(args.sequence_length)
     num_layers = 2
     bidirectional = True
     epochs = int(args.epochs)
@@ -111,17 +117,19 @@ def main():
             decoder = model.SeqDecoderAttentionLSTM(hidden_size, vocab_size, batch_size, max_length, num_layers,
                                                     dropout_p=0.1).to(device)
     elif decoder_arch == "clas":
-        decoder = model.binaryClassifierNet(hidden_size)
+        decoder = model.BinaryClassifierNet(hidden_size)
     else:
         raise Exception("Select valid encoder architecture")
 
-    encoder_optimizer = optim.Adam(encoder.parameters(), lr=learning_rate)
-    decoder_optimizer = optim.Adam(decoder.parameters(), lr=learning_rate)
+    # give sum of parameters to the optimizer
+    optimizer = optim.Adam(list(encoder.parameters())+list(decoder.parameters()), lr=learning_rate)
+    #decoder_optimizer = optim.SGD(, lr=learning_rate)
 
     if decoder_arch == "clas":
         criterion = nn.BCELoss()
     else:
-        criterion = nn.NLLLoss()
+        criterion = nn.CrossEntropyLoss()
+        #criterion = nn.NLLLoss()
 
     """ Code to print baseline blue score between before and after data
     # Test the baseline BLEU score before transformation
@@ -137,12 +145,14 @@ def main():
     print(f'The baseline std of the bleu score is : {stdScores}')
     """
 
-    modelTrainer = training.Trainer(encoder, decoder, encoder_optimizer, decoder_optimizer, criterion, batch_size,
-                                    max_length, teacher_forcing_ratio, device, begin_token, end_token)
+    modelTrainer = training.Trainer(encoder, decoder, optimizer, criterion, batch_size,
+                                    max_length, teacher_forcing_ratio, device, begin_token, end_token, vocab_size)
+
+    print( f"Training data: {len(X_train)}, Test data: {len(X_test)}")
 
     for i in range(epochs):
         print(f'+++ Epoch number : {i} +++')
-        modelTrainer.trainIters(X_train, Y_train, n_iter, print_every=25)
+        modelTrainer.trainIters(X_train, Y_train, n_iter, print_every=20)
 
     if decoder_arch == "clas":
         modelTrainer.testClas(X_test, Y_test)

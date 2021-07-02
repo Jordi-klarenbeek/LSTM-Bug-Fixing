@@ -6,6 +6,7 @@ from tqdm import tqdm
 
 import torch
 import torch.nn as nn
+from torch.nn.utils.rnn import pack_padded_sequence
 import torch.nn.functional as F
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -23,11 +24,13 @@ class SeqEncoderLSTM(nn.Module):
             self.direct = 1
 
         self.embedding = nn.Embedding(input_size, hidden_size)
-        self.lstm = nn.LSTM(hidden_size, hidden_size // self.direct, num_layers, bidirectional=bidirect)
+        self.lstm = nn.LSTM(hidden_size, hidden_size // self.direct, num_layers, batch_first=True, bidirectional=bidirect)
 
     def forward(self, input, hidden_cell):
-        output = self.embedding(input).view(1, self.batch_size, -1)
-        output, hidden_cell = self.lstm(output, hidden_cell)
+        input_lengths = util.list_lengths(input)
+        output = self.embedding(input).view(self.batch_size, input.shape[1], -1)
+        packed_output = pack_padded_sequence(output, input_lengths, batch_first=True, enforce_sorted=False)
+        output, hidden_cell = self.lstm(packed_output, hidden_cell)
         return output, hidden_cell
 
     # Initialize the hidden and cell state
@@ -181,7 +184,8 @@ class SeqDecoderLSTM(nn.Module):
         output = self.embedding(input).view(1, self.batch_size, -1)
         output = F.relu(output)
         output, hidden_cell = self.lstm(output, hidden_cell)
-        output = self.softmax(self.out(output[0,:]))
+        output = self.out(output[0,:])
+        #self.softmax(
         return output, hidden_cell
 
     def initHidden(self):
@@ -226,9 +230,9 @@ class SeqDecoderAttentionLSTM(nn.Module):
         return (torch.rand(self.num_layers, self.batch_size, self.hidden_size, device=device),
                 torch.rand(self.num_layers, self.batch_size, self.hidden_size, device=device))
 
-class binaryClassifierNet(nn.Module):
+class BinaryClassifierNet(nn.Module):
     def __init__(self, hidden_size):
-        super(binaryClassifierNet,self).__init__()
+        super(BinaryClassifierNet,self).__init__()
         self.fc1 = nn.Linear(hidden_size,hidden_size)
         self.fc2 = nn.Linear(hidden_size,hidden_size)
         self.fc3 = nn.Linear(hidden_size,1)

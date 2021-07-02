@@ -5,18 +5,18 @@ import util
 import metrics
 import model
 import math
+import gc
 from treelstm import batch_tree_input
 from tqdm import tqdm
 
 
 class Trainer(object):
-    def __init__(self, encoder, decoder, encoder_optimizer, decoder_optimizer, criterion, batch_size, max_length,
-                 teacher_forcing_ratio, device, begin_token, end_token):
+    def __init__(self, encoder, decoder, optimizer, criterion, batch_size, max_length,
+                 teacher_forcing_ratio, device, begin_token, end_token, vocab_size):
         super(Trainer, self).__init__()
         self.encoder = encoder
         self.decoder = decoder
-        self.encoder_optimizer = encoder_optimizer
-        self.decoder_optimizer = decoder_optimizer
+        self.optimizer = optimizer
         self.criterion = criterion
         self.batch_size = batch_size
         self.max_length = max_length
@@ -24,6 +24,7 @@ class Trainer(object):
         self.device = device
         self.begin_token = begin_token
         self.end_token = end_token
+        self.vocab_size = vocab_size
 
     # helper function for training
     def trainTree(self, input_tree, target_tensor):
@@ -33,8 +34,7 @@ class Trainer(object):
         # Initialize zero tensor for encoder outputs, but this will only be used if decoder attention is supported with tree encoder
         encoder_outputs = torch.zeros(self.batch_size, self.max_length, self.encoder.hidden_size, device=self.device)
 
-        self.encoder_optimizer.zero_grad()
-        self.decoder_optimizer.zero_grad()
+        self.optimizer.zero_grad() # maybe only one optimizer
 
         loss = 0
 
@@ -66,7 +66,7 @@ class Trainer(object):
             # Teacher forcing: Feed the target as the next input
             for di in range(target_length):
                 decoder_output, decoder_hidden_cell = self.decoder(
-                    target_tensor[:, di].view(self.batch_size, 1), decoder_hidden_cell, encoder_outputs)
+                    target_tensor[:, di].unsqueeze(1), decoder_hidden_cell, encoder_outputs)
 
                 # calculate the loss separate for every output in the batch
                 loss += self.criterion(decoder_output, target_tensor[:, di + 1])
@@ -78,7 +78,7 @@ class Trainer(object):
             # Without teacher forcing: use its own predictions as the next input
             for di in range(target_length):
                 decoder_output, decoder_hidden_cell = self.decoder(
-                    decoder_input.view(self.batch_size, 1), decoder_hidden_cell, encoder_outputs)
+                    decoder_input.unsqueeze(1), decoder_hidden_cell, encoder_outputs)
                 topv, topi = decoder_output.topk(1)
                 decoder_input = topi.squeeze().detach()  # detach from history as input
 
@@ -86,32 +86,27 @@ class Trainer(object):
 
         loss.backward()
 
-        # clear cache and variables to free space on the GPU
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
+        self.optimizer.step()
 
-        self.encoder_optimizer.step()
-        self.decoder_optimizer.step()
+        # clear cache on the GPU
+        if torch.cuda.is_available():
+            del encoder_state
+            gc.collect()
+            torch.cuda.empty_cache()
 
         return loss.item() / target_length
 
     def trainSeq(self, input_tensor, target_tensor):
         encoder_hidden_cell = self.encoder.initHidden()
 
-        self.encoder_optimizer.zero_grad()
-        self.decoder_optimizer.zero_grad()
+        self.optimizer.zero_grad()
 
-        input_length = input_tensor.size(1)
+        # Target length is the length of the target_tensor without start token
         target_length = target_tensor.size(1) - 1
-
-        encoder_outputs = torch.zeros(self.batch_size, self.max_length, self.encoder.hidden_size, device=self.device)
 
         loss = 0
 
-        for ei in range(input_length):
-            encoder_output, encoder_hidden_cell = self.encoder(
-                input_tensor[:, ei].view(self.batch_size, 1), encoder_hidden_cell)
-            encoder_outputs[:, ei] = encoder_output[0, :]
+        encoder_outputs, encoder_hidden_cell = self.encoder(input_tensor.view(self.batch_size, self.max_length), encoder_hidden_cell)
 
         # Reshape hidden cell tuple to concat bidirectional values
         hidden = encoder_hidden_cell[0].view(self.encoder.num_layers, self.batch_size, self.encoder.hidden_size)
@@ -125,8 +120,7 @@ class Trainer(object):
             # Teacher forcing: Feed the target as the next input
             for di in range(target_length):
                 decoder_output, decoder_hidden_cell = self.decoder(
-                    target_tensor[:, di].view(self.batch_size, 1), decoder_hidden_cell, encoder_outputs)
-
+                    target_tensor[:, di].unsqueeze(1), decoder_hidden_cell, encoder_outputs)
                 # calculate the loss separate for every output in the batch
                 loss += self.criterion(decoder_output, target_tensor[:, di + 1])
 
@@ -138,32 +132,35 @@ class Trainer(object):
             # Without teacher forcing: use its own predictions as the next input
             for di in range(target_length):
                 decoder_output, decoder_hidden_cell = self.decoder(
-                    decoder_input.view(self.batch_size, 1), decoder_hidden_cell, encoder_outputs)
+                    decoder_input.unsqueeze(1), decoder_hidden_cell, encoder_outputs)
                 topv, topi = decoder_output.topk(1)
                 decoder_input = topi.squeeze().detach()  # detach from history as input
 
+                # calculate the loss separate for every output in the batch
                 loss += self.criterion(decoder_output, target_tensor[:, di + 1])
 
         loss.backward()
 
-        self.encoder_optimizer.step()
-        self.decoder_optimizer.step()
+        self.optimizer.step()
+
+        # clear cache on the GPU
+        if torch.cuda.is_available():
+            del encoder_outputs
+            gc.collect()
+            torch.cuda.empty_cache()
 
         return loss.item() / (target_length)
 
     def trainClassifier(self, input_tensor, labels):
-        self.encoder_optimizer.zero_grad()
-        self.decoder_optimizer.zero_grad()
+        self.optimizer.zero_grad()
 
         if isinstance(self.encoder, model.SeqEncoderLSTM):
             encoder_hidden_cell = self.encoder.initHidden()
 
-            for ei in range(self.max_length):
-                encoder_output, encoder_hidden_cell = self.encoder(
-                    input_tensor[:, ei].view(self.batch_size, 1), encoder_hidden_cell)
+            encoder_output, encoder_hidden_cell = self.encoder(input_tensor.view(self.batch_size, self.max_length), encoder_hidden_cell)
 
             # Reshape hidden cell tuple to concat bidirectional values
-            hidden = encoder_hidden_cell[0].view(1, self.batch_size, self.encoder.hidden_size)
+            hidden = encoder_hidden_cell[0].view(self.encoder.num_layers, self.batch_size, self.encoder.hidden_size)
         else:
             # returns tuple with hidden state and cell state
             encoder_state = self.encoder(input_tensor['features'], input_tensor['node_order'], input_tensor['adjacency_list'],
@@ -188,23 +185,24 @@ class Trainer(object):
 
         loss.backward()
 
-        self.encoder_optimizer.step()
-        self.decoder_optimizer.step()
+        self.optimizer.step()
+
+        # clear cache on the GPU
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
         return loss.item()
 
     def trainIters(self, X_list, Y_list, n_iters, print_every=100):
         start = time.time()
         print_loss_total = 0  # Reset every print_every
-        epoch_loss_total = 0
 
         for iter in range(n_iters):
-
             if isinstance(self.encoder, model.ChildSumTreeLSTM):
                 input_tree = X_list[iter * self.batch_size:(iter + 1) * self.batch_size]
                 batched_trees = batch_tree_input(input_tree)
 
-                if isinstance(self.decoder, model.binaryClassifierNet):
+                if isinstance(self.decoder, model.BinaryClassifierNet):
                     target_tensor = torch.tensor(Y_list[iter * self.batch_size:(iter + 1) * self.batch_size],
                                                  dtype=torch.float, device=self.device)
                     loss = self.trainClassifier(batched_trees, target_tensor)
@@ -217,7 +215,7 @@ class Trainer(object):
                 input_tensor = torch.tensor(X_list[iter * self.batch_size:(iter + 1) * self.batch_size],
                                             dtype=torch.long, device=self.device)
 
-                if isinstance(self.decoder, model.binaryClassifierNet):
+                if isinstance(self.decoder, model.BinaryClassifierNet):
                     target_tensor = torch.tensor(Y_list[iter * self.batch_size:(iter + 1) * self.batch_size],
                                                  dtype=torch.float, device=self.device)
                     loss = self.trainClassifier(input_tensor, target_tensor)
@@ -227,16 +225,12 @@ class Trainer(object):
                     loss = self.trainSeq(input_tensor, target_tensor)
 
             print_loss_total += loss
-            epoch_loss_total += loss
 
             if iter % print_every == 0 and iter != 0:
                 print_loss_avg = print_loss_total / print_every
                 print_loss_total = 0
                 print('%s (%d %d%%) %.4f' % (util.timeSince(start, iter / n_iters),
                                              iter * self.batch_size, iter / n_iters * 100, print_loss_avg))
-
-        epoch_loss_avg = print_loss_total
-        print('Average loss for epoch is %.4f (%s)' % (epoch_loss_avg, util.timeSince(start, n_iters)))
 
     # helper function for testing
     def testtree(self, X_list, Y_list):
@@ -292,12 +286,17 @@ class Trainer(object):
                     bleuScores.append(metrics.calcBleu(target_tensor[ci], output_tensor[ci], self.end_token))
                     matches.append(metrics.calcMatch(target_tensor[ci], output_tensor[ci]))
 
+            # clear cache on the GPU
+            if torch.cuda.is_available():
+                del encoder_state
+                gc.collect()
+                torch.cuda.empty_cache()
+
             self.eval(bleuScores, matches)
 
     def testseq(self, X_test, Y_test):
         with torch.no_grad():
             input_amount = len(X_test) - (len(X_test) % self.batch_size)
-            input_length = 1000
 
             bleuScores = []
             matches = []
@@ -308,15 +307,9 @@ class Trainer(object):
                 target_tensor = torch.tensor(Y_test[i * self.batch_size:(i + 1) * self.batch_size], dtype=torch.long,
                                              device=self.device)
 
-                # Initialize encoder output sequence with zero
-                encoder_outputs = torch.zeros(self.batch_size, self.max_length, self.encoder.hidden_size,
-                                              device=self.device)
                 encoder_hidden_cell = self.encoder.initHidden()
 
-                for ei in range(input_length):
-                    encoder_output, encoder_hidden_cell = self.encoder(
-                        input_tensor[:, ei].view(self.batch_size, 1), encoder_hidden_cell)
-                    encoder_outputs[:, ei] = encoder_output[0, :]
+                encoder_outputs, encoder_hidden_cell = self.encoder(input_tensor.view(self.batch_size, self.max_length), encoder_hidden_cell)
 
                 # Reshape hidden cell tuple to concat bidirectional values
                 hidden = encoder_hidden_cell[0].view(self.encoder.num_layers, self.batch_size, self.encoder.hidden_size)
@@ -336,9 +329,17 @@ class Trainer(object):
                     for i in range(self.batch_size):
                         output_tensor[i].append(decoder_input[i].tolist())
 
+                print(output_tensor)
+
                 for i in range(self.batch_size):
                     bleuScores.append(metrics.calcBleu(target_tensor[i], output_tensor[i], self.end_token))
                     matches.append(metrics.calcMatch(target_tensor[i], output_tensor[i]))
+
+            # clear cache on the GPU
+            if torch.cuda.is_available():
+                del encoder_outputs
+                gc.collect()
+                torch.cuda.empty_cache()
 
             self.eval(bleuScores, matches)
 
@@ -371,9 +372,7 @@ class Trainer(object):
 
                     encoder_hidden_cell = self.encoder.initHidden()
 
-                    for ei in range(self.max_length):
-                        encoder_output, encoder_hidden_cell = self.encoder(
-                            input_tensor[:, ei].view(self.batch_size, 1), encoder_hidden_cell)
+                    encoder_output, encoder_hidden_cell = self.encoder(input_tensor.view(self.batch_size, self.max_length), encoder_hidden_cell)
 
                     # Reshape hidden cell tuple to concat bidirectional values
                     hidden = encoder_hidden_cell[0].view(1, self.batch_size, self.encoder.hidden_size)
@@ -399,11 +398,15 @@ class Trainer(object):
                         hidden[0][j] = encoder_state[0][index]
                         j += 1
 
-                prediction = self.decoder(hidden)
+                prediction = self.decoder(hidden).view(self.batch_size)
 
-                for label in labels:
+                for i in range(self.batch_size):
                     total += 1
-                    if round(prediction) == label:
+                    if round(prediction[i].item()) == labels[i].item():
                         match += 1
+
+            # clear cache on the GPU
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
 
             print(f"Accuracy of model is {match/total} of {total} datapoints")

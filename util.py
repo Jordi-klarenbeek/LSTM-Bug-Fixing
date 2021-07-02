@@ -103,3 +103,18 @@ def timeSince(since, percent):
     es = s / (percent)
     rs = es - s
     return '%s (- %s)' % (asMinutes(s), asMinutes(rs))
+
+def list_lengths(tensor):
+    batch_size = tensor.shape[0]
+    tensor_length = tensor.shape[1]
+    lengths = []
+
+    for ai in range(batch_size):
+        for bi in range(tensor_length):
+            if tensor[ai][bi].item() == 0:
+                lengths.append(bi+1)
+                break
+            elif bi == tensor_length-1:
+                lengths.append(bi+1)
+
+    return lengths
