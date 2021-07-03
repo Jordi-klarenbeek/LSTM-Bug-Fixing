@@ -8,7 +8,6 @@ import math
 import argparse
 import training
 
-
 def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f'The model will use as device : {device}')
@@ -98,6 +97,8 @@ def main():
     epochs = int(args.epochs)
     end_token = int(args.end_token)
     begin_token = int(args.begin_token)
+    early_stopping = True
+    min_epochs = 10
 
     print(f"Hidden size : {hidden_size}")
 
@@ -117,7 +118,7 @@ def main():
             decoder = model.SeqDecoderAttentionLSTM(hidden_size, vocab_size, batch_size, max_length, num_layers,
                                                     dropout_p=0.1).to(device)
     elif decoder_arch == "clas":
-        decoder = model.BinaryClassifierNet(hidden_size)
+        decoder = model.BinaryClassifierNet(hidden_size, num_layers).to(device)
     else:
         raise Exception("Select valid encoder architecture")
 
@@ -150,9 +151,25 @@ def main():
 
     print( f"Training data: {len(X_train)}, Test data: {len(X_test)}")
 
+    loss_epochs = []
     for i in range(epochs):
         print(f'+++ Epoch number : {i} +++')
-        modelTrainer.trainIters(X_train, Y_train, n_iter, print_every=20)
+        loss = modelTrainer.trainIters(X_train, Y_train, n_iter, print_every=1)
+
+        print(f'+++ Average Epoch loss : {loss} +++')
+
+        # Check for early stopping if the training takes longer than the minimal amount of epochs
+        if i > min_epochs and early_stopping:
+
+            # Calculate average loss of last 5 epochs
+            avg_loss = sum(loss_epochs[i-5:i])/5
+
+            # Stop training if the difference between this epoch's loss and avg loss is 1%
+            if abs(avg_loss-loss)<(avg_loss*0.05):
+                print(f'No significant difference in loss, training is stopped...')
+                break
+
+        loss_epochs.append(loss)
 
     if decoder_arch == "clas":
         modelTrainer.testClas(X_test, Y_test)

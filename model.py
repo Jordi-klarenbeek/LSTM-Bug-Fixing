@@ -231,9 +231,9 @@ class SeqDecoderAttentionLSTM(nn.Module):
                 torch.rand(self.num_layers, self.batch_size, self.hidden_size, device=device))
 
 class BinaryClassifierNet(nn.Module):
-    def __init__(self, hidden_size):
+    def __init__(self, hidden_size, num_layers_decoder):
         super(BinaryClassifierNet,self).__init__()
-        self.fc1 = nn.Linear(hidden_size,hidden_size)
+        self.fc1 = nn.Linear(hidden_size*num_layers_decoder,hidden_size)
         self.fc2 = nn.Linear(hidden_size,hidden_size)
         self.fc3 = nn.Linear(hidden_size,1)
 

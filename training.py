@@ -160,7 +160,7 @@ class Trainer(object):
             encoder_output, encoder_hidden_cell = self.encoder(input_tensor.view(self.batch_size, self.max_length), encoder_hidden_cell)
 
             # Reshape hidden cell tuple to concat bidirectional values
-            hidden = encoder_hidden_cell[0].view(self.encoder.num_layers, self.batch_size, self.encoder.hidden_size)
+            hidden = encoder_hidden_cell[0].view(1, self.batch_size, self.encoder.hidden_size*self.encoder.num_layers)
         else:
             # returns tuple with hidden state and cell state
             encoder_state = self.encoder(input_tensor['features'], input_tensor['node_order'], input_tensor['adjacency_list'],
@@ -196,6 +196,7 @@ class Trainer(object):
     def trainIters(self, X_list, Y_list, n_iters, print_every=100):
         start = time.time()
         print_loss_total = 0  # Reset every print_every
+        loss_total = 0
 
         for iter in range(n_iters):
             if isinstance(self.encoder, model.ChildSumTreeLSTM):
@@ -225,12 +226,15 @@ class Trainer(object):
                     loss = self.trainSeq(input_tensor, target_tensor)
 
             print_loss_total += loss
+            loss_total += loss
 
             if iter % print_every == 0 and iter != 0:
                 print_loss_avg = print_loss_total / print_every
                 print_loss_total = 0
                 print('%s (%d %d%%) %.4f' % (util.timeSince(start, iter / n_iters),
                                              iter * self.batch_size, iter / n_iters * 100, print_loss_avg))
+
+        return loss_total / n_iters
 
     # helper function for testing
     def testtree(self, X_list, Y_list):
@@ -375,7 +379,7 @@ class Trainer(object):
                     encoder_output, encoder_hidden_cell = self.encoder(input_tensor.view(self.batch_size, self.max_length), encoder_hidden_cell)
 
                     # Reshape hidden cell tuple to concat bidirectional values
-                    hidden = encoder_hidden_cell[0].view(1, self.batch_size, self.encoder.hidden_size)
+                    hidden = encoder_hidden_cell[0].view(1, self.batch_size, self.encoder.hidden_size*self.encoder.num_layers)
                 else:
                     input_tree = X_test[i * self.batch_size:(i + 1) * self.batch_size]
                     tree_batch = batch_tree_input(input_tree)

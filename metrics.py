@@ -25,8 +25,6 @@ def calcBleu(reference, hypothesis, end_token):
 
     return sentence_bleu(reference_strings_lst, hypothesis_strings)
 
-# top 5 accuracy
-
 # Top 1 accuracy
 def calcMatch(reference, hypothesis):
     # Check if all elements of reference and hypothesis match exactly
