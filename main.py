@@ -10,7 +10,7 @@ import training
 
 def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f'The model will use as device : {device}')
+    print(f'The model will use as device : {device} | With {torch.get_num_threads()} threads')
 
     args_parser = argparse.ArgumentParser(
         description='AST parser can create ASTs from CPP code in JSON format and can transform the AST trees back to code')
@@ -98,7 +98,7 @@ def main():
     end_token = int(args.end_token)
     begin_token = int(args.begin_token)
     early_stopping = True
-    min_epochs = 10
+    min_epochs = 25
 
     print(f"Hidden size : {hidden_size}")
 
@@ -106,6 +106,7 @@ def main():
         encoder = model.SeqEncoderLSTM(vocab_size, hidden_size, batch_size, num_layers, bidirectional).to(device)
     elif encoder_arch == "tree":
         encoder = model.ChildSumTreeLSTM(vocab_size, hidden_size).to(device)
+        num_layers = 1
     else:
         raise Exception("Select valid decoder architecture")
 
@@ -154,7 +155,7 @@ def main():
     loss_epochs = []
     for i in range(epochs):
         print(f'+++ Epoch number : {i} +++')
-        loss = modelTrainer.trainIters(X_train, Y_train, n_iter, print_every=1)
+        loss = modelTrainer.trainIters(X_train, Y_train, n_iter, print_every=math.floor(len(X_train)/5))
 
         print(f'+++ Average Epoch loss : {loss} +++')
 

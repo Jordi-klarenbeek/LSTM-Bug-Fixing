@@ -157,10 +157,16 @@ class Trainer(object):
         if isinstance(self.encoder, model.SeqEncoderLSTM):
             encoder_hidden_cell = self.encoder.initHidden()
 
-            encoder_output, encoder_hidden_cell = self.encoder(input_tensor.view(self.batch_size, self.max_length), encoder_hidden_cell)
+            encoder_outputs, encoder_hidden_cell = self.encoder(input_tensor.view(self.batch_size, self.max_length), encoder_hidden_cell)
 
             # Reshape hidden cell tuple to concat bidirectional values
             hidden = encoder_hidden_cell[0].view(1, self.batch_size, self.encoder.hidden_size*self.encoder.num_layers)
+
+            # clear cache on the GPU
+            if torch.cuda.is_available():
+                del encoder_outputs
+                gc.collect()
+                torch.cuda.empty_cache()
         else:
             # returns tuple with hidden state and cell state
             encoder_state = self.encoder(input_tensor['features'], input_tensor['node_order'], input_tensor['adjacency_list'],
@@ -178,6 +184,12 @@ class Trainer(object):
             for index in tree_indices:
                 hidden[0][j] = encoder_state[0][index]
                 j += 1
+
+            # clear cache on the GPU
+            if torch.cuda.is_available():
+                del encoder_state
+                gc.collect()
+                torch.cuda.empty_cache()
 
         prediction = self.decoder(hidden)
 
@@ -333,8 +345,6 @@ class Trainer(object):
                     for i in range(self.batch_size):
                         output_tensor[i].append(decoder_input[i].tolist())
 
-                print(output_tensor)
-
                 for i in range(self.batch_size):
                     bleuScores.append(metrics.calcBleu(target_tensor[i], output_tensor[i], self.end_token))
                     matches.append(metrics.calcMatch(target_tensor[i], output_tensor[i]))
@@ -376,10 +386,16 @@ class Trainer(object):
 
                     encoder_hidden_cell = self.encoder.initHidden()
 
-                    encoder_output, encoder_hidden_cell = self.encoder(input_tensor.view(self.batch_size, self.max_length), encoder_hidden_cell)
+                    encoder_outputs, encoder_hidden_cell = self.encoder(input_tensor.view(self.batch_size, self.max_length), encoder_hidden_cell)
 
                     # Reshape hidden cell tuple to concat bidirectional values
                     hidden = encoder_hidden_cell[0].view(1, self.batch_size, self.encoder.hidden_size*self.encoder.num_layers)
+
+                    # clear cache on the GPU
+                    if torch.cuda.is_available():
+                        del encoder_outputs
+                        gc.collect()
+                        torch.cuda.empty_cache()
                 else:
                     input_tree = X_test[i * self.batch_size:(i + 1) * self.batch_size]
                     tree_batch = batch_tree_input(input_tree)
@@ -402,15 +418,17 @@ class Trainer(object):
                         hidden[0][j] = encoder_state[0][index]
                         j += 1
 
+                    # clear cache on the GPU
+                    if torch.cuda.is_available():
+                        del encoder_state
+                        gc.collect()
+                        torch.cuda.empty_cache()
+
                 prediction = self.decoder(hidden).view(self.batch_size)
 
                 for i in range(self.batch_size):
                     total += 1
                     if round(prediction[i].item()) == labels[i].item():
                         match += 1
-
-            # clear cache on the GPU
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
 
             print(f"Accuracy of model is {match/total} of {total} datapoints")

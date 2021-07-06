@@ -4,3 +4,10 @@
 venv/
 /venv
 .idea/workspace.xml
+venv/Lib/site-packages/matplotlib/__pycache__/_cm.cpython-39.pyc
+venv/Lib/site-packages/matplotlib/backends/__pycache__/backend_gtk3agg.cpython-39.pyc
+venv/Lib/site-packages/matplotlib/backends/__pycache__/backend_agg.cpython-39.pyc
+venv/Lib/site-packages/matplotlib/backends/__pycache__/_backend_tk.cpython-39.pyc
+venv/Lib/
+venv/Lib
+venv
