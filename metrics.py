@@ -11,17 +11,21 @@ def calcBleu(reference, hypothesis, end_token):
     # transform tokens of reference into strings
     for token in reference:
         reference_strings.append(str(token.item()))
-        if token.item() == end_token:
+        if token.item() == end_token :
             break
 
-    # sentence_bleu expects a list with reference, so with only one refernce it will get a list with one reference list of tokens
+    # sentence_bleu expects a list with reference, so with only one reference it will get a list with one reference list of tokens
     reference_strings_lst.append(reference_strings)
 
     # transform tokens of hypothesis list into strings
     for token in hypothesis:
-        hypothesis_strings.append(str(token))
-        if token == end_token:
+        if token == 0:
             break
+        elif token == end_token:
+            hypothesis_strings.append(str(token))
+            break
+        else:
+            hypothesis_strings.append(str(token))
 
     return sentence_bleu(reference_strings_lst, hypothesis_strings)
 

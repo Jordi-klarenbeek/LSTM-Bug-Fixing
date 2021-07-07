@@ -100,7 +100,7 @@ def main():
     early_stopping = True
     min_epochs = 25
 
-    print(f"Hidden size : {hidden_size}")
+    print(f"Hidden size : {hidden_size} | With zero padding cutoff")
 
     if encoder_arch == "seq":
         encoder = model.SeqEncoderLSTM(vocab_size, hidden_size, batch_size, num_layers, bidirectional).to(device)
