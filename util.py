@@ -47,18 +47,18 @@ def import_data(split, dataset_path, encoder, decoder):
 
             X_total.append(X)
 
-        split_index = 20
+        #split_index = 20
         X_train = X_total[:split_index]
-        X_test = X_train
-        #X_test = X_total[split_index:]
+        #X_test = X_train
+        X_test = X_total[split_index:]
 
         Y_total = []
         for index, row in df_shuffled.iterrows():
             Y_total.append(row['label'])
 
         Y_train = Y_total[:split_index]
-        Y_test = Y_train
-        #Y_test = Y_total[split_index:]
+        #Y_test = Y_train
+        Y_test = Y_total[split_index:]
 
         # save extra info in dataset
         test_extra_info = df_shuffled.loc[split_index:, 'CWE ID':'Vulnerability Classification']
@@ -77,10 +77,10 @@ def import_data(split, dataset_path, encoder, decoder):
 
             X_total.append(X)
 
-        split_index = 20
+        #split_index = 20
         X_train = X_total[:split_index]
-        X_test = X_train
-        #X_test = X_total[split_index:]
+        #X_test = X_train
+        X_test = X_total[split_index:]
 
         Y_total = []
         for index, row in df_shuffled.iterrows():
@@ -88,8 +88,8 @@ def import_data(split, dataset_path, encoder, decoder):
             Y_total.append(arrayList)
 
         Y_train = Y_total[:split_index]
-        Y_test = Y_train
-        #Y_test = Y_total[split_index:]
+        #Y_test = Y_train
+        Y_test = Y_total[split_index:]
 
         # save extra info in dataset
         test_extra_info = df_shuffled.loc[split_index:, 'CWE ID':'Vulnerability Classification']
