@@ -1,4 +1,4 @@
-from proc_util import sequentializer
+from proc_util import preprocessor
 import pandas as pd
 import numpy as np
 import json
@@ -10,49 +10,49 @@ seq_before_path = "C:/Users/jordi/OneDrive/Documenten/Master/Eind Project/Data/a
 seq_after_path = "C:/Users/jordi/OneDrive/Documenten/Master/Eind Project/Data/antlr_output/after/seq.csv"
 edit_path = "C:/Users/jordi/OneDrive/Documenten/Master/Eind Project/Data/antlr_output/after/edits.csv"
 
-seq = sequentializer()
+proc = preprocessor()
 
 reader_before = pd.read_csv(ast_before_path, sep=',', chunksize=1000)
-reader_after = pd.read_csv(edit_path, sep=',', chunksize=1000)
+reader_after = pd.read_csv(ast_after_path, sep=',', chunksize=1000)
 
-before = pd.DataFrame(columns=['id', 'before'])
-after = pd.DataFrame(columns=['id', 'after'])
+before = pd.DataFrame(columns=['id', 'CWE ID', 'CVE ID', 'Vulnerability Classification', 'before', 'label'])
+after = pd.DataFrame(columns=['id', 'CWE ID', 'CVE ID', 'Vulnerability Classification', 'after'])
 
 print("load before ast trees and process")
 for chunk in reader_before:
-    before = seq.load_ast(before, chunk, True, "before")
+    before = proc.load_ast(before, chunk, True, "before", 1)
 
-#print("load after ast trees and sequentialise")
-#for chunk in reader_after:
-#    after = seq.load_ast(after, chunk, True, "after")
+print("load after ast trees and sequentialise")
+for chunk in reader_after:
+    before = proc.load_ast(before, chunk, True, "before", 0)
 
 #for chunk in reader_before:
-#    before = seq.load_seq(before, chunk, "tree", limit=1000)
+#    before = proc.load_seq(before, chunk, "tree", limit=1000)
 
-for chunk in reader_after:
-    after = seq.load_seq(after, chunk, "after", limit=700)
+#for chunk in reader_after:
+#    after = proc.load_seq(after, chunk, "after", limit=700)
 
 # Find max sequence length and pad all sequences to that length
-#max_depth_before, avg_depth_before  = seq.get_max_depth(before, histogram=True)
-max_length_after, avg_length_after = seq.get_seq_length(after, 'after', histogram=False)
+#max_depth_before, avg_depth_before  = proc.get_max_depth(before, histogram=True)
+#max_length_after, avg_length_after = proc.get_seq_length(after, 'after', histogram=True)
 #print(f'Max depth before: {max_depth_before}, Avg depth before: {avg_depth_before}')
-print(f'Max length seq: {max_length_after}, Avg length: {avg_length_after}, Number of sequences : {after.shape[0]}')
+#print(f'Max length seq: {max_length_after}, Avg length: {avg_length_after}, Number of sequences : {after.shape[0]}')
 
-max_length = 700
+max_length = 1000
 
-before = seq.pad_sequences(before, max_length, 'before')
-after = seq.pad_sequences(after, max_length, 'after')
+before = proc.pad_sequences(before, max_length, 'before')
+#after = proc.pad_sequences(after, max_length, 'after')
 
-#for i, row in before.iterrows():
-#    row['tree'] = json.dumps(row['tree'])
+#print("zip before trees and after sequences")
+#seq_path = proc.zip_df(before, after)
 
-print("zip before trees and after sequences")
-seq_path = seq.zip_df(before, after, before_tree=False)
-
-for i, row in seq_path.iterrows():
+for i, row in before.iterrows():
     # or row['seq after']==[1, 3, 2] or row['seq after']==[1, 3, 14, 10, 11, 7, 2] or row['seq before']==[1, 3, 2] or row['seq before']==[1, 3, 14, 10, 11, 7, 2]
     #len(row['before'])>max_length or
     if len(row['before'])>max_length:
-        seq_path.drop(i, inplace=True)
+        before.drop(i, inplace=True)
 
-seq_path.to_csv('C:/Users/jordi/OneDrive/Documenten/Master/Eind Project/Data/seq2edit_parsed700.csv', index=False, mode='w')
+#max_length_after, avg_length_after = seq.get_seq_length(seq_path, 'after', histogram=True)
+#print(f'Max length seq: {max_length_after}, Avg length: {avg_length_after}, Number of sequences : {seq_path.shape[0]}')
+
+before.to_csv('C:/Users/jordi/OneDrive/Documenten/Master/Eind Project/Data/binseq_extrainfo.csv', index=False, mode='w')

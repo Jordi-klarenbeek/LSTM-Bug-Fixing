@@ -3,6 +3,7 @@ import torch
 from torch import optim
 import torch.nn as nn
 import util
+import metrics
 import model
 import math
 import argparse
@@ -75,6 +76,18 @@ def main():
                              help='the begin token of a sequence',
                              required=True)
 
+    args_parser.add_argument('-o', '--output_programs',
+                             metavar='output_programs',
+                             type=str,
+                             help='save the top ten best produced programs in text file',
+                             required=True)
+
+    args_parser.add_argument('-vocab', '--output_vocab',
+                             metavar='output_vocab',
+                             type=str,
+                             help='the vocabulary used to translate tokens to concrete AST',
+                             required=True)
+
     args = args_parser.parse_args()
 
     encoder_arch = args.encoder
@@ -82,7 +95,7 @@ def main():
     training_split = 0.9
 
     print(f"Path to input data : {args.csv_file_path}")
-    X_train, Y_train, X_test, Y_test = util.import_data(training_split, args.csv_file_path, encoder_arch, decoder_arch)
+    X_train, Y_train, X_test, Y_test, vuln_info = util.import_data(training_split, args.csv_file_path, encoder_arch, decoder_arch)
 
     # Fill in hyperparameters
     teacher_forcing_ratio = 0.9
@@ -99,6 +112,8 @@ def main():
     begin_token = int(args.begin_token)
     early_stopping = True
     min_epochs = 25
+    vocab_path = args.output_vocab
+    output_programs = args.output_programs
 
     print(f"Hidden size : {hidden_size} | With zero padding cutoff")
 
@@ -125,7 +140,6 @@ def main():
 
     # give sum of parameters to the optimizer
     optimizer = optim.Adam(list(encoder.parameters())+list(decoder.parameters()), lr=learning_rate)
-    #decoder_optimizer = optim.SGD(, lr=learning_rate)
 
     if decoder_arch == "clas":
         criterion = nn.BCELoss()
@@ -133,11 +147,11 @@ def main():
         criterion = nn.CrossEntropyLoss()
         #criterion = nn.NLLLoss()
 
-    """ Code to print baseline blue score between before and after data
+    """"
     # Test the baseline BLEU score before transformation
     bleuScores = []
-    for i in range(Y_test.shape[0]):
-        bleuScores.append(util.calcBleu(X_test[i], Y_test[i]))
+    for i in range(len(Y_test)):
+        bleuScores.append(metrics.calcBleu(X_test[i], Y_test[i], end_token))
 
     meanScores = sum(bleuScores) / len(bleuScores)
     varScores = sum([((x - meanScores) ** 2) for x in bleuScores]) / len(bleuScores)
@@ -155,7 +169,7 @@ def main():
     loss_epochs = []
     for i in range(epochs):
         print(f'+++ Epoch number : {i} +++')
-        loss = modelTrainer.trainIters(X_train, Y_train, n_iter, print_every=math.floor(len(X_train)/5))
+        loss = modelTrainer.trainIters(X_train, Y_train, n_iter, print_every=10)
 
         print(f'+++ Average Epoch loss : {loss} +++')
 
@@ -173,11 +187,11 @@ def main():
         loss_epochs.append(loss)
 
     if decoder_arch == "clas":
-        modelTrainer.testClas(X_test, Y_test)
+        modelTrainer.testClas(X_test, Y_test, vuln_info)
     elif encoder_arch == "tree":
-        modelTrainer.testtree(X_test, Y_test)
+        modelTrainer.testtree(X_test, Y_test, output_programs, vocab_path, vuln_info)
     else:
-        modelTrainer.testseq(X_test, Y_test)
+        modelTrainer.testseq(X_test, Y_test, output_programs, vocab_path, vuln_info)
 
 if __name__ == "__main__":
     main()

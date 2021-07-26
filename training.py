@@ -6,6 +6,7 @@ import metrics
 import model
 import math
 import gc
+import pandas as pd
 from treelstm import batch_tree_input
 from tqdm import tqdm
 
@@ -249,12 +250,11 @@ class Trainer(object):
         return loss_total / n_iters
 
     # helper function for testing
-    def testtree(self, X_list, Y_list):
+    def testtree(self, X_list, Y_list, output_programs, vocab_path, vul_info):
         with torch.no_grad():
             input_amount = len(X_list) - (len(X_list) % self.batch_size)
 
-            bleuScores = []
-            matches = []
+            output_df = pd.DataFrame(columns=['CWE ID', 'CVE ID', 'Vulnerability Classification', 'predicted repair', 'actual repair', 'BLEU score', 'Match'])
 
             for evi in tqdm(range(0, input_amount, self.batch_size), desc="Evaluation : "):
                 input_tree = X_list[evi:evi + self.batch_size]
@@ -286,7 +286,7 @@ class Trainer(object):
 
                 decoder_hidden_cell = (hidden, cell)
 
-                output_tensor = [[self.begin_token] for _ in range(self.batch_size)]
+                output_list = [[self.begin_token] for _ in range(self.batch_size)]
                 decoder_input = torch.tensor([self.begin_token]*self.batch_size, device=self.device)
 
                 for di in range(self.max_length):
@@ -296,11 +296,15 @@ class Trainer(object):
                     decoder_input = topi.squeeze().detach()  # detach from history as input
 
                     for ai in range(self.batch_size):
-                        output_tensor[ai].append(decoder_input[ai].tolist())
+                        output_list[ai].append(decoder_input[ai].tolist())
 
-                for ci in range(self.batch_size):
-                    bleuScores.append(metrics.calcBleu(target_tensor[ci], output_tensor[ci], self.end_token))
-                    matches.append(metrics.calcMatch(target_tensor[ci], output_tensor[ci]))
+                for i in range(self.batch_size):
+                    translated_target = util.translate(target_tensor[i], "tensor", vocab_path, self.end_token)
+                    translated_output = util.translate(output_list[i], "list", vocab_path, self.end_token)
+
+                    bleu_score = metrics.calcBleu(translated_target, translated_output)
+                    match = metrics.calcMatch(translated_target, translated_output)
+                    output_df = output_df.append([{'CWE ID':vul_info.loc[evi+i, 'CWE ID'], 'CVE ID':vul_info.loc[evi+i, 'CVE ID'], 'Vulnerability Classification':vul_info.loc[evi+i, 'Vulnerability Classification'], 'predicted repair':translated_output, 'actual repair':translated_target, 'BLEU score':bleu_score, 'Match':match}], ignore_index=True)
 
             # clear cache on the GPU
             if torch.cuda.is_available():
@@ -308,19 +312,18 @@ class Trainer(object):
                 gc.collect()
                 torch.cuda.empty_cache()
 
-            self.eval(bleuScores, matches)
+            self.eval(output_df, output_programs)
 
-    def testseq(self, X_test, Y_test):
+    def testseq(self, X_test, Y_test, output_programs, vocab_path, vul_info):
         with torch.no_grad():
             input_amount = len(X_test) - (len(X_test) % self.batch_size)
 
-            bleuScores = []
-            matches = []
+            output_df = pd.DataFrame(columns=['CWE ID', 'CVE ID', 'Vulnerability Classification', 'predicted repair', 'actual repair', 'BLEU score', 'Match'])
 
-            for i in tqdm(range(math.floor(input_amount / self.batch_size)), desc="Evaluation : "):
-                input_tensor = torch.tensor(X_test[i * self.batch_size:(i + 1) * self.batch_size], dtype=torch.long,
+            for evi in tqdm(range(math.floor(input_amount / self.batch_size)), desc="Evaluation : "):
+                input_tensor = torch.tensor(X_test[evi * self.batch_size:(evi + 1) * self.batch_size], dtype=torch.long,
                                             device=self.device)
-                target_tensor = torch.tensor(Y_test[i * self.batch_size:(i + 1) * self.batch_size], dtype=torch.long,
+                target_tensor = torch.tensor(Y_test[evi * self.batch_size:(evi + 1) * self.batch_size], dtype=torch.long,
                                              device=self.device)
 
                 encoder_hidden_cell = self.encoder.initHidden()
@@ -334,7 +337,7 @@ class Trainer(object):
                 decoder_hidden_cell = (hidden, cell)
 
                 decoder_input = torch.tensor([self.begin_token] * self.batch_size, dtype=torch.long, device=self.device)
-                output_tensor = [[self.begin_token] for _ in range(self.batch_size)]
+                output_list = [[self.begin_token] for _ in range(self.batch_size)]
 
                 for di in range(self.max_length):
                     decoder_output, decoder_hidden_cell = self.decoder(
@@ -343,11 +346,22 @@ class Trainer(object):
                     decoder_input = topi.squeeze().detach()  # detach from history as input
 
                     for i in range(self.batch_size):
-                        output_tensor[i].append(decoder_input[i].tolist())
+                        output_list[i].append(decoder_input[i].tolist())
+
 
                 for i in range(self.batch_size):
-                    bleuScores.append(metrics.calcBleu(target_tensor[i], output_tensor[i], self.end_token))
-                    matches.append(metrics.calcMatch(target_tensor[i], output_tensor[i]))
+                    translated_target = util.translate(target_tensor[i], "tensor", vocab_path, self.end_token)
+                    translated_output = util.translate(output_list[i], "list", vocab_path, self.end_token)
+
+                    bleu_score = metrics.calcBleu(translated_target, translated_output)
+                    match = metrics.calcMatch(translated_target, translated_output)
+                    output_df = output_df.append([{'CWE ID': vul_info.loc[evi + i, 'CWE ID'],
+                                                   'CVE ID': vul_info.loc[evi + i, 'CVE ID'],
+                                                   'Vulnerability Classification': vul_info.loc[
+                                                       evi + i, 'Vulnerability Classification'],
+                                                   'predicted repair': translated_output,
+                                                   'actual repair': translated_target, 'BLEU score': bleu_score,
+                                                   'Match': match}], ignore_index=True)
 
             # clear cache on the GPU
             if torch.cuda.is_available():
@@ -355,33 +369,41 @@ class Trainer(object):
                 gc.collect()
                 torch.cuda.empty_cache()
 
-            self.eval(bleuScores, matches)
+            self.eval(output_df, output_programs)
 
-    def eval(self, bleuScores, matches):
-        matchScores = sum(matches) / len(matches)
+    def eval(self, output_df, output_programs):
+        matchScores = sum(output_df['Match']) / len(output_df['Match'])
 
         print(f'The accuracy is : {matchScores}')
 
-        meanScores = sum(bleuScores) / len(bleuScores)
-        varScores = sum([((x - meanScores) ** 2) for x in bleuScores]) / len(bleuScores)
+        meanScores = sum(output_df['BLEU score']) / len(output_df['BLEU score'])
+        varScores = sum([((x - meanScores) ** 2) for x in output_df['BLEU score']]) / len(output_df['BLEU score'])
         stdScores = varScores ** 0.5
 
         print(f'The average bleu score is : {meanScores}')
         print(f'The std of the bleu score is : {stdScores}')
 
-    def testClas(self, X_test, Y_test):
+        if output_programs == "test":
+            print('Saving best 10 programs to file...')
+            util.save_best_10_programs(output_df)
+            print('Print average BLEU score per CWE...')
+            util.print_CWE_average(output_df)
+
+    def testClas(self, X_test, Y_test, vul_info):
         with torch.no_grad():
             input_amount = len(X_test) - (len(X_test) % self.batch_size)
 
             match = 0
             total = 0
 
-            for i in tqdm(range(math.floor(input_amount / self.batch_size)), desc="Evaluation : "):
-                labels = torch.tensor(Y_test[i * self.batch_size:(i + 1) * self.batch_size], dtype=torch.long,
+            CWE_accuracy_df = pd.DataFrame(columns=['CWE', 'match', 'total', 'accuracy'])
+
+            for evi in tqdm(range(math.floor(input_amount / self.batch_size)), desc="Evaluation : "):
+                labels = torch.tensor(Y_test[evi * self.batch_size:(evi + 1) * self.batch_size], dtype=torch.long,
                                              device=self.device)
 
                 if isinstance(self.encoder, model.SeqEncoderLSTM):
-                    input_tensor = torch.tensor(X_test[i * self.batch_size:(i + 1) * self.batch_size], dtype=torch.long,
+                    input_tensor = torch.tensor(X_test[evi * self.batch_size:(evi + 1) * self.batch_size], dtype=torch.long,
                                                 device=self.device)
 
                     encoder_hidden_cell = self.encoder.initHidden()
@@ -397,7 +419,7 @@ class Trainer(object):
                         gc.collect()
                         torch.cuda.empty_cache()
                 else:
-                    input_tree = X_test[i * self.batch_size:(i + 1) * self.batch_size]
+                    input_tree = X_test[evi * self.batch_size:(evi + 1) * self.batch_size]
                     tree_batch = batch_tree_input(input_tree)
 
                     # returns tuple with hidden state and cell state
@@ -431,4 +453,9 @@ class Trainer(object):
                     if round(prediction[i].item()) == labels[i].item():
                         match += 1
 
-            print(f"Accuracy of model is {match/total} of {total} datapoints")
+                    cwe_id = vul_info.loc[evi + i, 'CWE ID']
+                    CWE_accuracy_df = util.calc_clas_CWE_accuracy(CWE_accuracy_df, cwe_id, prediction[i], labels[i])
+
+            print("Accuracy per CWE of model is :")
+            print(CWE_accuracy_df.sort_values('accuracy', ascending=False))
+            print(f"Total accuracy of model is {match/total} of {total} datapoints")

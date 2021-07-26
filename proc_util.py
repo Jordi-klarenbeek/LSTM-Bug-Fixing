@@ -5,12 +5,10 @@ import matplotlib.pyplot as plt
 from treelstm import calculate_evaluation_orders
 
 """
-Sequentializer object:
-Creates a sequence of a JSON ast tree
-Add padding 
-Measure max length of sequences and depth of trees
+Preprocessor class:
+preprocesses the input for the deep learning models
 """
-class sequentializer:
+class preprocessor:
     def __init__(self):
         self.depth_list = []
 
@@ -20,18 +18,12 @@ class sequentializer:
         # initialize list with start token
         self.ast_list = []
 
-        # Add open bracket token
-        #self.ast_list.append(1)
-
         # Append root token
         self.ast_list.append(ast_dict['token'])
 
         # Loop through the children and append them to ast_list
         if 'children' in ast_dict.keys():
             self.dftraversal(ast_dict)
-
-        # Add close bracket token
-        #self.ast_list.append(2)
 
         return self.ast_list
 
@@ -54,22 +46,18 @@ class sequentializer:
         return seq_df
 
     # combine the before and after dataframe
-    def zip_df(self, before_df, after_df, before_tree):
-        df = pd.DataFrame(columns=['id', 'before', 'after'])
+    def zip_df(self, before_df, after_df):
+        df = pd.DataFrame(columns=['id', 'CWE ID', 'CVE ID', 'Vulnerability Classification', 'before', 'after'])
 
         # iterate over every row in before_df dataframe
         for i, row in before_df.iterrows():
             # program id row['id']
             if row['id'] in after_df.values:
                 id = row['id']
-                if before_tree:
-                    before = json.dumps(row['before'])
-                else:
-                    before = row['before']
-
+                before = row['before']
                 after = after_df.loc[after_df['id'] == row['id']]['after'].tolist()[0]
 
-                df = df.append({'id': id, 'before': before, 'after': after}, ignore_index=True)
+                df = df.append({'id': id, 'CWE ID': row['CWE ID'], 'CVE ID': row['CVE ID'], 'Vulnerability Classification': row['Vulnerability Classification'], 'before': before, 'after': after}, ignore_index=True)
 
         return df
 
@@ -88,7 +76,8 @@ class sequentializer:
         depths = list()
 
         for i, row in ast_df.iterrows():
-            self.depth(row['tree'], 0)
+            print(row['before'])
+            self.depth(row['before'], 0)
             depths.append(max(self.depth_list))
             self.depth_list = []
 
@@ -118,7 +107,8 @@ class sequentializer:
 
         return max(lengths), sum(lengths)/len(lengths)
 
-    def load_ast(self, seq_df, ast, sequentialize, column_name):
+    # Load parsed tree input
+    def load_ast(self, seq_df, ast, sequentialize, column_name, label):
         for index, row in ast.iterrows():
             ast_dict = json.loads(row['AST'])
             if(sequentialize):
@@ -126,11 +116,13 @@ class sequentializer:
             else:
                 #ast_list = ast_dict
                 ast_list = self.create_ast_lists(ast_dict)
+                ast_list = json.dumps(ast_list)
 
-            seq_df = seq_df.append([{'id' : row['id'],  column_name : ast_list}], ignore_index=True)
+            seq_df = seq_df.append([{'id' : row['id'], 'CWE ID': row['CWE ID'], 'CVE ID': row['CVE ID'], 'Vulnerability Classification': row['Vulnerability Classification'], column_name : ast_list, 'label': label}], ignore_index=True)
 
         return seq_df
 
+    # Load patch input
     def load_seq(self, seq_df, edit, column_name, limit):
         for index, row in edit.iterrows():
             edit_list = json.loads(row['Edits'])
@@ -140,6 +132,7 @@ class sequentializer:
 
         return seq_df
 
+    # Create the different lists used in the Tree LSTM
     def create_ast_lists(self, tree):
         self.adj_list = []
         self.features = []
